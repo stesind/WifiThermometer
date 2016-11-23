@@ -1,5 +1,9 @@
-# VentilationTimerClock
+# WifiThermometer
 
-A simple timer clock for a home ventilation system. Project files are for platform.io.
+A simple Wifi enabled thermometer based on ESP8266 - WeMos D1 Mini.
 
-It is based on ESP8266 using DHT22 and P channel mosfet. Time is synced by NTP.
+Still in development and has obsolete code. However it is working.
+
+Libs have to be installed in the lib folder or via PlatformIO. The BME280 lib is taken from Arduinos Libs, not from PlatformIO but is provided by the same developer.
+
+Copy the file src/Constants.h.Sample to src/Constants.h and fill in required values.
