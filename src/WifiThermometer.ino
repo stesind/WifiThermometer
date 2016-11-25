@@ -759,7 +759,8 @@ void handleRoot() {
                 answer +="</p>";
         }
 
-        answer += "<A HREF=\"javascript:history.go(0)\">Click to refresh the page</A>";
+        answer += "<p><A HREF=\"javascript:history.go(0)\">Click to refresh the page</A></p>";
+        answer += "<p><A HREF=\"/table\">Table view</A></p>";
         answer += "</body></html>";
         server.sendHeader("Cache-Control", "no-cache");
         server.send ( 200, "text/html", answer );
