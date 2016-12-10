@@ -33,11 +33,21 @@
 #include <BME280.h>
 #include <Adafruit_Sensor.h>
 #include "SSD1306.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
 //LiquidCrystal_I2C lcd(0x27, 20, 4);
+// Data wire is plugged into pin 2 on the Arduino
+#define ONE_WIRE_BUS 0
 
+// Setup a oneWire instance to communicate with any OneWire devices
+// (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pass our oneWire reference to Dallas Temperature.
+DallasTemperature sensors(&oneWire);
 
 //temparure sensor
 BME280 bme;                   // Default : forced mode, standby time = 1000 ms
@@ -141,6 +151,7 @@ int readingCapBtn;
 
 bool enableDht = ENABLEDHT;
 bool enableBme = ENABLEBME;
+bool enableDS18B20 = ENABLEDS18B20;
 
 bool readEnvironment = true;
 bool turnDisplayOff = false;
@@ -317,12 +328,12 @@ void setup() {
         //Serial.println(WiFi.hostname());
 
 
-        // // Initialize file system.
-        // if (!SPIFFS.begin())
-        // {
-        //         Serial.println("Failed to mount file system");
-        //         return;
-        // }
+        // Initialize file system.
+        if (!SPIFFS.begin())
+        {
+                Serial.println("Failed to mount file system");
+                return;
+        }
         //
         // // Load wifi connection information.
         // if (!loadConfig(&station_ssid, &station_psk))
@@ -412,6 +423,8 @@ void setup() {
         server.on ( "/pressure", handlePressure );
         server.on ( "/time", handleTime );
         server.on ( "/table", handleTable );
+        server.on ( "/file", handleFile );
+        server.on ( "/deleteFile", deleteFile );
 
         server.onNotFound ( handleNotFound );
         server.begin();
@@ -436,6 +449,11 @@ void setup() {
         if (enableBme) {
                 Serial << "enabling BME" << endl;
                 bme.begin();
+        }
+        //DS18B20
+        // Start up the library
+        if (enableDS18B20) {
+                    sensors.begin();
         }
 
         //setSyncProvider((time_t)getNtpTime());
@@ -515,6 +533,38 @@ void loop() {
                         pfPres[ulMeasCount%ulNoMeasValues] = bme.ReadPressure(1);
                         pulTime[ulMeasCount%ulNoMeasValues] = now();
                 }
+                if (enableDS18B20) {
+                  sensors.requestTemperatures();
+                  pfHum[ulMeasCount%ulNoMeasValues] = 0.0;
+                  pfTemp[ulMeasCount%ulNoMeasValues] = sensors.getTempCByIndex(0); //0 is the first device on the bus
+                  pfPres[ulMeasCount%ulNoMeasValues] = 0.0;
+                  pulTime[ulMeasCount%ulNoMeasValues] = now();
+                }
+                //write clima data to fs
+                File f = SPIFFS.open("/clima-data.txt", "a");
+                if (!f) {
+                        Serial.println("file open failed");
+                } else {
+                        char buffer[24];
+                        sprintf(buffer, "%02d:%02d:%02d %02d.%02d.%04d", \
+                                hour(), \
+                                minute(), \
+                                second(), \
+                                day(), \
+                                month(), \
+                                year());
+                        String sLine = buffer;
+                        //sAnswer += epoch_to_string(pulTime[ulIndex]).c_str();
+                        sLine += " , ";
+                        sLine += pfTemp[ulMeasCount%ulNoMeasValues];
+                        sLine += " , ";
+                        sLine += pfHum[ulMeasCount%ulNoMeasValues];
+                        sLine += " , ";
+                        sLine += pfPres[ulMeasCount%ulNoMeasValues];
+                        f.println(sLine);
+                        f.close();
+                }
+
                 if (ulMeasCount >= ulNoMeasValues) {
                         ulMeasCount = 0;
                 } else {
@@ -557,7 +607,7 @@ void loop() {
         //         ulMeasCount++;
         // }
 
-        Alarm.delay(200);
+        Alarm.delay(50);
 
         //delay(200);
         //yield();
@@ -758,9 +808,26 @@ void handleRoot() {
                 answer += buffer;
                 answer +="</p>";
         }
+        if (enableDS18B20) {
+                ////dht22 sensor
+                Serial.println("Reading DS18820");
+                sensors.requestTemperatures(); // Send the command to get temperatures
+                float temperature = sensors.getTempCByIndex(0);
+
+                Serial << " Temperatur: " << temperature << " C" <<endl;
+
+                answer += "<p>";
+                char str_temp[3];
+                dtostrf(temperature, 2, 1, str_temp); // da %f nicht im arduino implementiert is
+                sprintf(buffer, "DS18820: Temp: %sC", str_temp);
+                answer += buffer;
+
+                answer +="</p>";
+        }
 
         answer += "<p><A HREF=\"javascript:history.go(0)\">Click to refresh the page</A></p>";
         answer += "<p><A HREF=\"/table\">Table view</A></p>";
+        answer += "<p><A HREF=\"/file\">File view</A></p>";
         answer += "</body></html>";
         server.sendHeader("Cache-Control", "no-cache");
         server.send ( 200, "text/html", answer );
@@ -968,4 +1035,65 @@ void handleTable ()
                 //pclient->write(sTable.c_str(),sTable.length());
         }
 
+}
+void handleFile () {
+        File f = SPIFFS.open("/clima-data.txt", "r");
+        if (!f)  {
+                String sAnswer = "No data available yet.";
+                server.send ( 200, "text/plain", sAnswer );
+        }
+        else
+        {
+                String sAnswer = \
+                        "<html>\
+          <head>\
+            <title>";
+                sAnswer += NAME;
+                sAnswer += "</title>\
+            <style>\
+              body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
+            </style>\
+          </head>\
+          <body>\
+          <h1><a href=\"/\">";
+                sAnswer += NAME;
+                sAnswer += "</a></h1>";
+                //sAnswer += "<table>";
+                sAnswer += "<table style=\"width:100%\"><tr><th>Time</th><th>Temperature</th><th>Humidity</th><th>Pressure</th></tr>";
+                sAnswer += "<style>table, th, td {border: 2px solid black; border-collapse: collapse;} th, td {padding: 5px;} th {text-align: left;}</style>";
+
+                while (f.available()) {
+                        //Lets read line by line from the file
+                        sAnswer += "<tr><td>";
+                        String item = f.readStringUntil(','); //time
+                        sAnswer += item;
+                        sAnswer += "</td><td>";
+                        item = f.readStringUntil(','); //temp
+                        sAnswer += item;
+                        sAnswer += "</td><td>";
+                        item = f.readStringUntil(',');            //hum
+                        sAnswer += item;
+                        sAnswer += "</td><td>";
+                        item = f.readStringUntil('\n');            //pres
+                        sAnswer += item;
+                        sAnswer += "</td></tr>";
+                }
+
+                // remaining chunk
+                sAnswer+="</table>";
+                sAnswer += "<p><A HREF=\"/table\">Table view</A></p>";
+                sAnswer += "<p><A HREF=\"/file\">Delete file and all data</A></p>";
+                sAnswer += "</body></html>";
+                server.sendHeader("Cache-Control", "no-cache");
+                server.send ( 200, "text/html", sAnswer );
+                //pclient->print(sTable);
+                //pclient->write(sTable.c_str(),sTable.length());
+                f.close();
+        }
+
+
+
+}
+void deleteFile() {
+        SPIFFS.remove("/clima-data.txt");
 }
